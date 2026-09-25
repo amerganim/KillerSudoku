@@ -5,6 +5,14 @@ import com.ganim.killersudoku.engine.model.Digits
 import com.ganim.killersudoku.engine.model.Geometry
 import com.ganim.killersudoku.engine.model.KillerPuzzle
 
+/** Digits and pencil marks at one moment - one undo step. */
+class BoardSnapshot(val values: IntArray, val notes: IntArray) {
+    override fun equals(other: Any?): Boolean =
+        other is BoardSnapshot && values.contentEquals(other.values) && notes.contentEquals(other.notes)
+
+    override fun hashCode(): Int = 31 * values.contentHashCode() + notes.contentHashCode()
+}
+
 /**
  * The player's board: pen digits, pencil marks, lives and undo. No Android types, so it
  * is unit-tested on the JVM.
@@ -14,13 +22,15 @@ class GameSession(
     val values: IntArray = IntArray(Geometry.CELLS),
     val notes: IntArray = IntArray(Geometry.CELLS),
     mistakes: Int = 0,
+    undo: List<BoardSnapshot> = emptyList(),
 ) {
     var mistakes: Int = mistakes
         private set
 
-    private val undoStack = ArrayDeque<Snapshot>()
+    private val undoStack = ArrayDeque(undo)
 
-    private class Snapshot(val values: IntArray, val notes: IntArray)
+    /** Oldest first, for persisting. */
+    val undoHistory: List<BoardSnapshot> get() = undoStack.toList()
 
     enum class Entry { CORRECT, WRONG, IGNORED }
 
@@ -61,6 +71,12 @@ class GameSession(
 
     /** Correct digits are final: erasing them only invites a second mistake. */
     fun isLocked(cell: Int): Boolean = values[cell] != 0 && values[cell] == puzzle.solution[cell]
+
+    /** For "restart" after running out of lives. Undo history goes too: it would restore a lost board. */
+    fun resetMistakes() {
+        mistakes = 0
+        undoStack.clear()
+    }
 
     fun undo(): Boolean {
         val s = undoStack.removeLastOrNull() ?: return false
@@ -105,7 +121,7 @@ class GameSession(
         Geometry.peers[cell].asList() + puzzle.cages[puzzle.cageOf[cell]].cells.filter { it != cell }
 
     private fun pushUndo() {
-        undoStack.addLast(Snapshot(values.copyOf(), notes.copyOf()))
+        undoStack.addLast(BoardSnapshot(values.copyOf(), notes.copyOf()))
         if (undoStack.size > UNDO_DEPTH) undoStack.removeFirst()
     }
 

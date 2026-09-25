@@ -1,80 +1,70 @@
 package com.ganim.killersudoku.ui.theme
 
+import android.app.Activity
+import android.provider.Settings
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 
-/** Board-specific colours that Material's scheme has no slot for. */
-@Immutable
-class BoardColors(
-    val background: Color,
-    val gridThin: Color,
-    val gridThick: Color,
-    val cage: Color,
-    val cageSum: Color,
-    val given: Color,
-    val entered: Color,
-    val error: Color,
-    val errorFill: Color,
-    val note: Color,
-    val selected: Color,
-    val related: Color,
-    val sameDigit: Color,
-    val cageHighlight: Color,
-    val hint: Color,
-)
+/** The app theme. Structure lifted from Nonogram; the palette in [Color.kt] is Killer's own. */
 
-private val LightBoard = BoardColors(
-    background = Color(0xFFFFFDF8),
-    gridThin = Color(0xFFD5D0C6),
-    gridThick = Color(0xFF3D3A35),
-    cage = Color(0xFF6B665E),
-    cageSum = Color(0xFF3D3A35),
-    given = Color(0xFF1F1D1A),
-    entered = Color(0xFF2F5FA8),
-    error = Color(0xFFC62828),
-    errorFill = Color(0x22C62828),
-    note = Color(0xFF6B665E),
-    selected = Color(0xFFBFD5F5),
-    related = Color(0xFFEFEAE0),
-    sameDigit = Color(0xFFD9E5F7),
-    cageHighlight = Color(0xFFF6EFD9),
-    hint = Color(0xFFFFE08A),
-)
+val LocalBoardColors = staticCompositionLocalOf { LightBoardColors }
 
-private val DarkBoard = BoardColors(
-    background = Color(0xFF1C1B1A),
-    gridThin = Color(0xFF3A3834),
-    gridThick = Color(0xFFB9B3A8),
-    cage = Color(0xFF9C968B),
-    cageSum = Color(0xFFD8D2C6),
-    given = Color(0xFFECE6DA),
-    entered = Color(0xFF8DB4F0),
-    error = Color(0xFFFF7B72),
-    errorFill = Color(0x33FF7B72),
-    note = Color(0xFFA8A296),
-    selected = Color(0xFF2E4A73),
-    related = Color(0xFF282623),
-    sameDigit = Color(0xFF263850),
-    cageHighlight = Color(0xFF2F2B21),
-    hint = Color(0xFF6B5410),
-)
+/** True when the player has asked the system to reduce animation (ANIMATOR_DURATION_SCALE 0). */
+val LocalReduceMotion = staticCompositionLocalOf { false }
 
-val LocalBoardColors = staticCompositionLocalOf { LightBoard }
+/**
+ * Animation durations. All under 300ms, and going through [duration] is what makes the
+ * reduce-motion setting apply everywhere at once.
+ */
+object Motion {
+    const val QUICK = 140
+    const val STANDARD = 260
+    const val MAXIMUM = 300
+
+    fun duration(base: Int, reduceMotion: Boolean): Int = if (reduceMotion) 0 else base
+}
 
 @Composable
-fun KillerTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    val scheme = if (dark) {
-        darkColorScheme(primary = Color(0xFF8DB4F0), background = Color(0xFF141312), surface = Color(0xFF141312))
-    } else {
-        lightColorScheme(primary = Color(0xFF2F5FA8), background = Color(0xFFF7F4EE), surface = Color(0xFFF7F4EE))
+fun KillerTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    content: @Composable () -> Unit,
+) {
+    val context = LocalContext.current
+    val reduceMotion = remember(context) {
+        runCatching {
+            Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+        }.getOrDefault(false)
     }
-    androidx.compose.runtime.CompositionLocalProvider(LocalBoardColors provides if (dark) DarkBoard else LightBoard) {
-        MaterialTheme(colorScheme = scheme, content = content)
+
+    // The system picks status-bar icon colour from this flag, not from what is behind
+    // them; without it the light theme gets white icons on paper.
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? Activity)?.window ?: return@SideEffect
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !darkTheme
+                isAppearanceLightNavigationBars = !darkTheme
+            }
+        }
+    }
+
+    CompositionLocalProvider(
+        LocalBoardColors provides if (darkTheme) DarkBoardColors else LightBoardColors,
+        LocalReduceMotion provides reduceMotion,
+    ) {
+        MaterialTheme(
+            colorScheme = if (darkTheme) DarkScheme else LightScheme,
+            typography = AppTypography,
+            content = content,
+        )
     }
 }

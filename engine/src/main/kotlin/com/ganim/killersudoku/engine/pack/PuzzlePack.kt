@@ -124,6 +124,26 @@ object PuzzlePack {
         }
 
         operator fun get(index: Int): KillerPuzzle = decodeRecord(data, offsets[index], index, difficultyOf(index))
+
+        /**
+         * A content id for puzzle [index]: FNV-1a 64 over its record bytes, in hex.
+         *
+         * Saved progress is keyed by this rather than by index, so regenerating the pack
+         * cannot attach a player's half-finished board to a different puzzle. A puzzle
+         * that survives a regeneration unchanged keeps its id.
+         */
+        fun idOf(index: Int): String {
+            val end = if (index + 1 < size) offsets[index + 1] else data.size
+            var h = -0x340d631b7bdddcdbL // FNV offset basis
+            for (i in offsets[index] until end) {
+                h = h xor (data[i].toLong() and 0xFF)
+                h *= 0x100000001b3L
+            }
+            return java.lang.Long.toHexString(h).padStart(16, '0')
+        }
+
+        /** Cage count without decoding the record: its first six bits. */
+        fun cageCount(index: Int): Int = (data[offsets[index]].toInt() and 0xFF) shr 2
     }
 
     fun decode(data: ByteArray): Pack = Pack(data)

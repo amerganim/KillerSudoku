@@ -6,10 +6,13 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
@@ -21,7 +24,9 @@ import com.ganim.killersudoku.engine.model.Digits
 import com.ganim.killersudoku.engine.model.Geometry
 import com.ganim.killersudoku.engine.model.KillerPuzzle
 import com.ganim.killersudoku.ui.theme.BoardColors
+import com.ganim.killersudoku.ui.theme.DisplayFamily
 import com.ganim.killersudoku.ui.theme.LocalBoardColors
+import com.ganim.killersudoku.ui.theme.over
 
 /**
  * The 9x9 board: highlights, grid, dashed cage outlines inset inside the cells with the
@@ -46,35 +51,63 @@ fun BoardCanvas(ui: GameUi, onSelect: (Int) -> Unit, modifier: Modifier = Modifi
             },
     ) {
         val s = size.width / 9f
-        drawRect(colors.background)
+        drawRect(colors.cell)
         drawHighlights(ui, s, colors)
         drawGrid(s, colors)
-        drawCages(ui.puzzle, outlines, s, colors, measurer)
+        drawCages(ui, outlines, s, colors, measurer)
+        drawSelection(ui.selected, s, colors)
         drawDigits(ui, s, colors, measurer)
     }
 }
 
 private fun DrawScope.cellOrigin(cell: Int, s: Float) = Offset(Geometry.col(cell) * s, Geometry.row(cell) * s)
 
-private fun DrawScope.drawHighlights(ui: GameUi, s: Float, colors: BoardColors) {
+/** The wash a cell wears, if any. One function, so the cage-sum label can match it exactly. */
+private fun washFor(ui: GameUi, c: Int, colors: BoardColors): Color? {
     val sel = ui.selected
-    val selCage = ui.puzzle.cageOf[sel]
     val selDigit = ui.values[sel]
+    return when {
+        ui.hint?.cell == c -> colors.hintWash
+        c == sel -> colors.selected
+        selDigit != 0 && ui.values[c] == selDigit -> colors.sameDigit
+        ui.puzzle.cageOf[c] == ui.puzzle.cageOf[sel] -> colors.cageHighlight
+        Geometry.sharesHouse(c, sel) -> colors.highlight
+        else -> null
+    }
+}
+
+/** What the cell actually looks like under its digit: the cell, its wash, and a clash on top. */
+private fun groundFor(ui: GameUi, c: Int, colors: BoardColors): Color {
+    var ground = colors.cell
+    washFor(ui, c, colors)?.let { ground = it.over(ground) }
+    if (ui.conflicts[c]) ground = colors.mistakeWash.over(ground)
+    return ground
+}
+
+private fun DrawScope.drawHighlights(ui: GameUi, s: Float, colors: BoardColors) {
     for (c in 0 until Geometry.CELLS) {
-        val color = when {
-            ui.hint?.cell == c -> colors.hint
-            c == sel -> colors.selected
-            selDigit != 0 && ui.values[c] == selDigit -> colors.sameDigit
-            ui.puzzle.cageOf[c] == selCage -> colors.cageHighlight
-            Geometry.sharesHouse(c, sel) -> colors.related
-            else -> null
-        } ?: continue
-        drawRect(color, cellOrigin(c, s), Size(s, s))
-        if (ui.conflicts[c]) drawRect(colors.errorFill, cellOrigin(c, s), Size(s, s))
+        val wash = washFor(ui, c, colors) ?: continue
+        drawRect(wash, cellOrigin(c, s), Size(s, s))
     }
     for (c in 0 until Geometry.CELLS) {
-        if (ui.conflicts[c]) drawRect(colors.errorFill, cellOrigin(c, s), Size(s, s))
+        if (ui.conflicts[c]) drawRect(colors.mistakeWash, cellOrigin(c, s), Size(s, s))
     }
+}
+
+/**
+ * The selection is a ring in the accent, not a heavy fill: a wash strong enough to find
+ * at a glance took a wrong digit on it below 3:1 in the dark theme.
+ */
+private fun DrawScope.drawSelection(cell: Int, s: Float, colors: BoardColors) {
+    val w = 2.5f * density
+    val o = cellOrigin(cell, s)
+    drawRoundRect(
+        colors.accent,
+        topLeft = Offset(o.x + w / 2, o.y + w / 2),
+        size = Size(s - w, s - w),
+        cornerRadius = CornerRadius(s * 0.12f),
+        style = Stroke(w),
+    )
 }
 
 private fun DrawScope.drawGrid(s: Float, colors: BoardColors) {
@@ -82,7 +115,7 @@ private fun DrawScope.drawGrid(s: Float, colors: BoardColors) {
     val thick = 2.5f * density / 1.5f
     for (i in 0..9) {
         val w = if (i % 3 == 0) thick else thin
-        val col = if (i % 3 == 0) colors.gridThick else colors.gridThin
+        val col = if (i % 3 == 0) colors.gridLineMajor else colors.gridLine
         drawLine(col, Offset(i * s, 0f), Offset(i * s, size.height), w)
         drawLine(col, Offset(0f, i * s), Offset(size.width, i * s), w)
     }
@@ -125,7 +158,7 @@ private class CageOutlines(puzzle: KillerPuzzle) {
     }
 }
 
-private fun DrawScope.drawCages(puzzle: KillerPuzzle, outlines: CageOutlines, s: Float, colors: BoardColors, measurer: TextMeasurer) {
+private fun DrawScope.drawCages(ui: GameUi, outlines: CageOutlines, s: Float, colors: BoardColors, measurer: TextMeasurer) {
     val inset = s * 0.09f
     val dash = PathEffect.dashPathEffect(floatArrayOf(s * 0.07f, s * 0.05f))
     val stroke = 1.2f * density
@@ -138,26 +171,26 @@ private fun DrawScope.drawCages(puzzle: KillerPuzzle, outlines: CageOutlines, s:
             pathEffect = dash,
         )
     }
-    val style = TextStyle(fontSize = (s * 0.21f / density / fontScale).sp, fontWeight = FontWeight.SemiBold, color = colors.cageSum)
-    for (cage in puzzle.cages) {
+    val style = TextStyle(fontSize = (s * 0.21f / density / fontScale).sp, fontWeight = FontWeight.SemiBold, color = colors.clueText, fontFamily = DisplayFamily)
+    for (cage in ui.puzzle.cages) {
         val o = cellOrigin(cage.anchor, s)
         val layout = measurer.measure(cage.sum.toString(), style)
         // Paint behind the label so the dashed line doesn't run through it.
-        drawRect(colors.background, Offset(o.x + inset * 0.5f, o.y + inset * 0.5f),
+        drawRect(groundFor(ui, cage.anchor, colors), Offset(o.x + inset * 0.5f, o.y + inset * 0.5f),
             Size(layout.size.width + inset * 0.6f, layout.size.height.toFloat()))
         drawText(layout, topLeft = Offset(o.x + inset * 0.7f, o.y + inset * 0.4f))
     }
 }
 
 private fun DrawScope.drawDigits(ui: GameUi, s: Float, colors: BoardColors, measurer: TextMeasurer) {
-    val big = TextStyle(fontSize = (s * 0.55f / density / fontScale).sp, fontWeight = FontWeight.Medium)
-    val small = TextStyle(fontSize = (s * 0.2f / density / fontScale).sp, color = colors.note)
+    val big = TextStyle(fontSize = (s * 0.55f / density / fontScale).sp, fontWeight = FontWeight.Medium, fontFamily = DisplayFamily)
+    val small = TextStyle(fontSize = (s * 0.2f / density / fontScale).sp, color = colors.textMuted)
     for (c in 0 until Geometry.CELLS) {
         val o = cellOrigin(c, s)
         val v = ui.values[c]
         if (v != 0) {
             val wrong = v != ui.puzzle.solution[c]
-            val layout = measurer.measure(v.toString(), big.copy(color = if (wrong || ui.conflicts[c]) colors.error else colors.entered))
+            val layout = measurer.measure(v.toString(), big.copy(color = if (wrong || ui.conflicts[c]) colors.cellMistake else colors.clueText))
             drawText(layout, topLeft = Offset(o.x + (s - layout.size.width) / 2, o.y + (s - layout.size.height) / 2 + s * 0.04f))
         } else if (ui.notes[c] != 0) {
             val sub = s * 0.8f / 3
