@@ -3,6 +3,7 @@ package com.ganim.killersudoku.ui
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -54,6 +55,9 @@ import com.ganim.killersudoku.data.SavedBoard
 import com.ganim.killersudoku.data.Settings
 import com.ganim.killersudoku.game.GameScreen
 import com.ganim.killersudoku.game.GameViewModel
+import com.ganim.killersudoku.monetize.AdTrigger
+import com.ganim.killersudoku.monetize.RewardPolicy
+import com.ganim.killersudoku.monetize.Sku
 import com.ganim.killersudoku.progression.LevelLadder
 import com.ganim.killersudoku.progression.PlayScreen
 import com.ganim.killersudoku.progression.PlayViewModel
@@ -98,8 +102,19 @@ fun KillerApp(container: AppContainer) {
     val completedCount by container.progress.observeCompletedCount().collectAsState(initial = 0)
     val completedIds by container.progress.observeCompletedIds().collectAsState(initial = emptySet())
     val stats by container.progress.observeStats().collectAsState(initial = null)
+    val wallet by container.monetization.wallet.collectAsState(initial = null)
+    val entitlements by container.billing.entitlements.collectAsState()
+    val products by container.billing.products.collectAsState()
+    // Billing takes a moment to connect and reports no entitlement until it does. Without
+    // the cached answer, someone who paid could see an interstitial in the first seconds
+    // of a launch - the one player who must never see one.
+    val cachedAdFree by container.monetization.cachedAdFree.collectAsState(initial = false)
+    val adFree = entitlements.adFree || cachedAdFree
+    val hintsRemaining = wallet?.let { it.freeRemaining + it.purchasedRemaining } ?: 0
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val activity = LocalActivity.current
+    val buy: (String) -> Unit = { sku -> activity?.let { container.billing.launchPurchase(it, sku) } }
 
     KillerTheme(darkTheme = settings.darkThemeOverride ?: isSystemInDarkTheme()) {
         val nav = rememberNavController()
@@ -154,6 +169,14 @@ fun KillerApp(container: AppContainer) {
                         onThemeChanged = { scope.launch { container.settings.setDarkThemeOverride(it) } },
                         onHowToPlay = { nav.navigate(Routes.HOW_TO_PLAY) },
                         onMorePuzzles = { app -> openStoreListing(context, app.packageName) },
+                        store = StoreUi(
+                            adFree = adFree,
+                            pending = entitlements.hasPendingPurchase,
+                            hintsRemaining = hintsRemaining,
+                            removeAdsPrice = Sku.priceOf(products[Sku.REMOVE_ADS]),
+                            hintPackPrice = Sku.priceOf(products[Sku.HINT_PACK_25]),
+                        ),
+                        onBuy = buy,
                         modifier = Modifier.statusBarsPadding(),
                     )
                 }
@@ -189,7 +212,7 @@ fun KillerApp(container: AppContainer) {
 
                     val model: GameViewModel = viewModel(
                         key = puzzleId,
-                        factory = GameViewModel.Factory(puzzleId, puzzle, title, load.board, dailyDate, container.progress),
+                        factory = GameViewModel.Factory(puzzleId, puzzle, title, load.board, dailyDate, container.progress, container.monetization),
                     )
                     LaunchedEffect(settings.autoNotes) { model.setAutoNotes(settings.autoNotes) }
 
@@ -216,6 +239,20 @@ fun KillerApp(container: AppContainer) {
                         haptics = settings.hapticsEnabled,
                         onToggleAutoNotes = { scope.launch { container.settings.setAutoNotes(!settings.autoNotes) } },
                         onExit = { nav.popBackStack() },
+                        hintsRemaining = hintsRemaining,
+                        onWatchAd = {
+                            val host = activity
+                            // No activity to show on is treated like no fill: grant anyway.
+                            host == null || RewardPolicy.shouldGrant(container.ads.showRewarded(host))
+                        },
+                        onBuyHints = if (products[Sku.HINT_PACK_25] != null) ({ buy(Sku.HINT_PACK_25) }) else null,
+                        hintPackPrice = Sku.priceOf(products[Sku.HINT_PACK_25]),
+                        onResultsDismissed = {
+                            // The one placement AdPolicy allows. It still decides - frequency
+                            // caps, the session limit and ad-free all apply inside.
+                            container.ads.onPuzzleCompleted()
+                            activity?.let { container.ads.maybeShowInterstitial(it, AdTrigger.RESULTS_DISMISSED, adFree) }
+                        },
                         onNext = nextLevel?.let { next ->
                             {
                                 nav.navigate(Routes.game(next.id, null)) {

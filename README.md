@@ -61,10 +61,64 @@ Pointing pairs moved from tier 4 to tier 3.
       conflicts, 3 lives, 200-step undo, technique-naming hints, saved game
 - [ ] Phase 2 remaining: render check against every cage shape in the pack, 60 fps on a low-end device, device testing
 - [x] Phase 3 shell and theming. Built and unit-tested. **Not yet checked on a device.**
-- [ ] Phase 4 ads + billing (re-verify entitlements in the new package)
+- [x] Phase 4 ads, billing, hardening. Built, policy-tested, and the minified release builds. **SDK paths need a
+      device and Play test tracks.**
 - [ ] Phase 5 store + closed testing (needs its own 12 testers × 14 days — start recruiting now)
 
-**187 tests, 0 failures** (engine 20, app 167).
+**227 tests, 0 failures** (engine 20, app 207).
+
+## Phase 4: monetization and hardening
+
+Nonogram's monetization was ported unchanged, tests included:
+
+- **`AdPolicy`**: an interstitial may only be considered when a results card is dismissed. Never mid-puzzle,
+  never on launch, and only after 3 puzzles, at least 3 minutes apart, at most 4 per session, and never for
+  ad-free players.
+- **`RewardPolicy`**: when there's no ad to show (no fill or offline), the reward is granted anyway. Only
+  closing the ad early withholds it.
+- **`HintEconomy`**: 3 free hints a day, refilled at local midnight and not stacked. Bought hints are kept,
+  and free ones are spent first.
+- **`AdMobAdManager`, `PlayBillingManager`**: restore purchases on every foreground, acknowledge them straight
+  away, and treat pending purchases as pending, not owned.
+
+Wired into Killer:
+
+| Where | What |
+|---|---|
+| Hint key | Shows how many hints are left. **The board is checked before the wallet**, so a wrong digit is pointed out for free and a solved board is never charged |
+| Out of hints | Offers a video for one hint, or the 25-pack at its localized price. A pack bought while the offer is open pays for the waiting hint |
+| Out of lives | **Watch a video, keep going** (one life back), or Start over |
+| Results card | Done / Next level go through `AdPolicy`, the only interstitial placement |
+| Settings → Store | Remove ads and 25 hints, each tappable only once Play returns a price. Shows "Payment pending" and "Ads removed" |
+
+**Nonogram has no store UI.** Nothing in it calls `launchPurchase`, so neither of its products can be bought.
+Killer has a store section on purpose, and Nonogram needs the same fix.
+
+Entitlements belong to a package. Buying "remove ads" in Nonogram doesn't remove them here, so nothing reads
+across apps. Both products must be created again in this app's Play Console listing.
+
+### Hardening
+
+- **Release build (R8)**: builds clean with the ported keep rules; the APK is **4.54 MB** (Nonogram's budget
+  is 15 MB). `-PlocalReleaseCheck=true` signs with the debug key and allows test ads so the minified build can be
+  run on a device. Without that flag, a release **fails** unless real AdMob IDs are in `local.properties`
+  (`admob.appId`, `admob.unit.interstitial`, `admob.unit.rewarded`).
+- **Orientation unlocked.** From targetSdk 36, Android ignores orientation locks on large screens, so the board
+  now takes the largest square that fits the height left over. Before, it overflowed in landscape and split
+  screen.
+- **Tested on the JVM**: `GameViewModelTest` covers the money rules (never charged for nothing, top-up, pack
+  bought mid-offer, life for a video) and which completions move the streak.
+
+### Still needs you
+
+1. **AdMob**: create a Killer Sudoku app with one interstitial and one rewarded unit, and put the IDs in
+   `local.properties`.
+2. **Play Console**: create `remove_ads` (non-consumable, ~$2.99) and `hint_pack_25` (consumable, ~$0.99) for
+   `com.ganim.killersudoku`, then upload to an internal test track and test buying, restoring after a
+   reinstall, and a pending purchase.
+3. **On the A15**: run `assembleRelease -PlocalReleaseCheck=true` and check that the database, pack and settings
+   survive a force-stop in the minified build, then a 4,000-event monkey run. This is the same list Nonogram's
+   Phase 6 verified.
 
 ## Phase 3: the shell, lifted from Nonogram
 

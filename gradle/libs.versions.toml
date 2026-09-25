@@ -17,6 +17,8 @@ navigationCompose = "2.10.1"
 datastore = "1.2.1"
 room = "2.8.5"
 ksp = "2.3.12"
+playServicesAds = "25.5.0"
+billing = "9.1.0"
 
 [libraries]
 # java.time on API 24-25, which the daily/streak logic needs.
@@ -26,6 +28,9 @@ androidx-datastore-preferences = { module = "androidx.datastore:datastore-prefer
 androidx-room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
 androidx-room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
 androidx-room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
+play-services-ads = { module = "com.google.android.gms:play-services-ads", version.ref = "playServicesAds" }
+# Play rejects uploads built against deprecated Billing versions; re-check before each release.
+billing-ktx = { module = "com.android.billingclient:billing-ktx", version.ref = "billing" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }

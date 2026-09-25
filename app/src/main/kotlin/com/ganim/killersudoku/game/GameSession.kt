@@ -72,6 +72,11 @@ class GameSession(
     /** Correct digits are final: erasing them only invites a second mistake. */
     fun isLocked(cell: Int): Boolean = values[cell] != 0 && values[cell] == puzzle.solution[cell]
 
+    /** A rewarded ad bought back one life. */
+    fun restoreLife() {
+        if (mistakes > 0) mistakes--
+    }
+
     /** For "restart" after running out of lives. Undo history goes too: it would restore a lost board. */
     fun resetMistakes() {
         mistakes = 0

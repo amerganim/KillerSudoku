@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -52,6 +53,8 @@ fun SettingsScreen(
     onHapticsChanged: (Boolean) -> Unit,
     onAutoNotesChanged: (Boolean) -> Unit,
     onMorePuzzles: (CrossPromo) -> Unit,
+    store: StoreUi,
+    onBuy: (String) -> Unit,
     onThemeChanged: (Boolean?) -> Unit,
     onHowToPlay: () -> Unit,
     modifier: Modifier = Modifier,
@@ -141,6 +144,8 @@ fun SettingsScreen(
             }
         }
 
+        StoreSection(store, onBuy)
+
         // Cross-promotion (puzzle-engine-core 10): a hardcoded list, not an SDK.
         Text("More puzzles", style = MaterialTheme.typography.titleSmall, color = colors.textMuted)
         CrossPromo.entries.forEach { app ->
@@ -150,6 +155,77 @@ fun SettingsScreen(
                 title = app.title,
                 subtitle = app.pitch,
                 onClick = { onMorePuzzles(app) },
+            )
+        }
+    }
+}
+
+/** What the store section shows. Prices are null until Play returns product details. */
+data class StoreUi(
+    val adFree: Boolean = false,
+    val pending: Boolean = false,
+    val hintsRemaining: Int = 0,
+    val removeAdsPrice: String? = null,
+    val hintPackPrice: String? = null,
+)
+
+/**
+ * The two products. Nonogram shipped its billing with no way into it - nothing called
+ * `launchPurchase` - so this section exists on purpose, and each row is only tappable
+ * once Play has returned a price for it. A row that opens nothing looks broken.
+ */
+@Composable
+private fun StoreSection(store: StoreUi, onBuy: (String) -> Unit) {
+    val colors = LocalBoardColors.current
+    Text("Store", style = MaterialTheme.typography.titleSmall, color = colors.textMuted)
+    if (store.pending) {
+        // Cash and carrier billing complete later; say so rather than look failed.
+        Panel(Modifier.fillMaxWidth(), tint = colors.info) {
+            Text("Payment pending", style = MaterialTheme.typography.titleSmall, color = colors.clueText)
+            Text(
+                "Google is still confirming a purchase. It will unlock here by itself.",
+                style = MaterialTheme.typography.labelLarge,
+                color = colors.textMuted,
+            )
+        }
+    }
+    if (store.adFree) {
+        Panel(Modifier.fillMaxWidth(), tint = colors.success) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GameIcon(Glyph.CHECK, colors.success, size = 20.dp)
+                Text("Ads removed. Thank you.", style = MaterialTheme.typography.titleSmall, color = colors.clueText)
+            }
+        }
+    } else {
+        StoreRow(
+            title = "Remove ads",
+            subtitle = "No more videos between puzzles. Optional videos for hints stay available.",
+            price = store.removeAdsPrice,
+            onClick = { onBuy(com.ganim.killersudoku.monetize.Sku.REMOVE_ADS) },
+        )
+    }
+    StoreRow(
+        title = "25 hints",
+        subtitle = "You have ${store.hintsRemaining}. Three free ones refill every day.",
+        price = store.hintPackPrice,
+        onClick = { onBuy(com.ganim.killersudoku.monetize.Sku.HINT_PACK_25) },
+    )
+}
+
+@Composable
+private fun StoreRow(title: String, subtitle: String, price: String?, onClick: () -> Unit) {
+    val colors = LocalBoardColors.current
+    Panel(Modifier.fillMaxWidth(), onClick = if (price != null) onClick else null) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall, color = colors.clueText)
+                Text(subtitle, style = MaterialTheme.typography.labelLarge, color = colors.textMuted)
+            }
+            Box(Modifier.width(10.dp))
+            Text(
+                price ?: "…",
+                style = MaterialTheme.typography.titleMedium,
+                color = if (price != null) colors.accent else colors.textMuted,
             )
         }
     }

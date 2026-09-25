@@ -9,6 +9,8 @@ import androidx.lifecycle.viewModelScope
 import com.ganim.killersudoku.data.ProgressRepository
 import com.ganim.killersudoku.data.SavedBoard
 import com.ganim.killersudoku.engine.model.KillerPuzzle
+import com.ganim.killersudoku.monetize.HintBank
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -34,6 +36,8 @@ class GameUi(
     val elapsedSeconds: Long,
     val hint: Hint?,
     val hintsUsed: Int,
+    /** The wallet is empty and a hint is waiting: offer a rewarded ad (or the pack). */
+    val hintNeedsTopUp: Boolean,
     val message: String?,
     val solved: Boolean,
     val outOfLives: Boolean,
@@ -54,6 +58,10 @@ class GameViewModel(
     restored: SavedBoard?,
     private val dailyDate: LocalDate?,
     private val progress: ProgressRepository,
+    /** Null means hints are free (previews). */
+    private val monetization: HintBank? = null,
+    /** Where the solver runs for a hint; injectable so tests stay on one thread. */
+    private val compute: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
 
     private val session = GameSession(
@@ -71,6 +79,8 @@ class GameViewModel(
     private var autoNotes = false
     private var hint: Hint? = null
     private var hintsUsed = 0
+    /** A hint already found but not yet paid for. */
+    private var pendingHint: Hint? = null
     private var message: String? = null
     private var timer: Job? = null
     private var recordedCompletion = session.isSolved
@@ -142,7 +152,15 @@ class GameViewModel(
         publish()
     }
 
+    /**
+     * Finds the next certain step, then pays for it.
+     *
+     * Order matters, as in Nonogram: the board is checked *before* the wallet, so a player
+     * is never charged a hint - or shown an ad - when there is nothing to reveal or a
+     * wrong digit has to go first.
+     */
     fun requestHint() {
+        if (session.isSolved || session.isOutOfLives) return
         val wrong = hints.wrongCell(session.values)
         if (wrong != null) {
             selected = wrong
@@ -151,14 +169,52 @@ class GameViewModel(
             return
         }
         viewModelScope.launch {
-            val found = withContext(Dispatchers.Default) { hints.next(session.values.copyOf()) }
-            hint = found
-            if (found != null) {
-                selected = found.cell
-                hintsUsed++
+            val found = withContext(compute) { hints.next(session.values.copyOf()) } ?: return@launch
+            val paid = monetization?.spendHint() ?: true
+            if (paid) show(found) else {
+                pendingHint = found
+                publish()
             }
-            publish()
         }
+    }
+
+    /** A rewarded ad was watched (or had no fill, which grants anyway): earn one, spend it. */
+    fun grantRewardedHint() {
+        val found = pendingHint ?: return
+        viewModelScope.launch {
+            monetization?.grantHintFromAd()
+            monetization?.spendHint()
+            show(found)
+        }
+    }
+
+    /** A hint pack was bought while the offer was open: the pending hint can now be paid for. */
+    fun retryPendingHint() {
+        val found = pendingHint ?: return
+        viewModelScope.launch {
+            if (monetization?.spendHint() != false) show(found)
+        }
+    }
+
+    fun cancelTopUp() {
+        pendingHint = null
+        publish()
+    }
+
+    private fun show(found: Hint) {
+        pendingHint = null
+        hint = found
+        selected = found.cell
+        hintsUsed++
+        publish()
+    }
+
+    /** Watching an ad restores one life, so an out-of-lives player can carry on. */
+    fun restoreLife() {
+        session.restoreLife()
+        message = null
+        publish()
+        save()
     }
 
     /** Places the digit the current hint proved. */
@@ -230,6 +286,7 @@ class GameViewModel(
         elapsedSeconds = elapsedMs / 1000,
         hint = hint,
         hintsUsed = hintsUsed,
+        hintNeedsTopUp = pendingHint != null,
         message = message,
         solved = session.isSolved,
         outOfLives = session.isOutOfLives,
@@ -242,9 +299,10 @@ class GameViewModel(
         private val restored: SavedBoard?,
         private val dailyDate: LocalDate?,
         private val progress: ProgressRepository,
+        private val monetization: HintBank?,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            GameViewModel(puzzleId, puzzle, title, restored, dailyDate, progress) as T
+            GameViewModel(puzzleId, puzzle, title, restored, dailyDate, progress, monetization) as T
     }
 }

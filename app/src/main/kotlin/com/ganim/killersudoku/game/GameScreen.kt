@@ -21,6 +21,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -40,6 +46,7 @@ import com.ganim.killersudoku.ui.components.Panel
 import com.ganim.killersudoku.ui.components.PrimaryButton
 import com.ganim.killersudoku.ui.components.ScoreRow
 import com.ganim.killersudoku.ui.theme.LocalBoardColors
+import kotlinx.coroutines.launch
 
 /**
  * The play screen: board, then tools, then a persistent number pad (build plan 6 - never
@@ -52,10 +59,40 @@ fun GameScreen(
     onToggleAutoNotes: () -> Unit,
     onExit: () -> Unit,
     onNext: (() -> Unit)?,
+    /** Free plus bought, for the badge. */
+    hintsRemaining: Int,
+    /** Plays a rewarded ad; true if the reward should be granted (no-fill grants too). */
+    onWatchAd: suspend () -> Boolean,
+    /** Opens the 25-hint purchase, or null when the product has not loaded. */
+    onBuyHints: (() -> Unit)?,
+    hintPackPrice: String?,
+    /** The only moment an interstitial may be considered (AdPolicy). */
+    onResultsDismissed: suspend () -> Unit,
 ) {
     val ui = vm.ui
     val colors = LocalBoardColors.current
     val feedback = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    var watching by remember { mutableStateOf(false) }
+
+    // A pack bought while the top-up offer was open: pay for the waiting hint with it.
+    LaunchedEffect(hintsRemaining, ui.hintNeedsTopUp) {
+        if (ui.hintNeedsTopUp && hintsRemaining > 0) vm.retryPendingHint()
+    }
+    fun watchAd(onGranted: () -> Unit) {
+        if (watching) return
+        watching = true
+        scope.launch {
+            if (onWatchAd()) onGranted()
+            watching = false
+        }
+    }
+    fun leave(then: () -> Unit) {
+        scope.launch {
+            onResultsDismissed()
+            then()
+        }
+    }
     fun tick() {
         if (haptics) feedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
     }
@@ -66,23 +103,33 @@ fun GameScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             TopBar(ui, onExit)
-            BoardCanvas(
-                ui,
-                onSelect = { tick(); vm.select(it) },
-                modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth(),
-            )
-            StatusLine(ui, vm)
-            Spacer(Modifier.weight(1f))
-            Tools(ui, vm, onToggleAutoNotes)
+            // The board takes the largest square that fits what is left once the hint
+            // line, tools and pad have their room. Sizing it from the width alone
+            // overflowed in landscape and split screen, which targetSdk 36 makes
+            // unavoidable on large screens.
+            Column(Modifier.weight(1f).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                BoardCanvas(
+                    ui,
+                    onSelect = { tick(); vm.select(it) },
+                    modifier = Modifier.weight(1f, fill = false).widthIn(max = 560.dp),
+                )
+                StatusLine(ui, vm, watching, onWatchAd = { watchAd(vm::grantRewardedHint) }, onBuyHints, hintPackPrice)
+            }
+            Tools(ui, vm, onToggleAutoNotes, hintsRemaining)
             Spacer(Modifier.height(10.dp))
             NumberPad(ui) { tick(); vm.digit(it) }
             Spacer(Modifier.height(10.dp))
         }
 
         if (ui.solved) {
-            ResultsCard(ui, onExit, onNext)
+            ResultsCard(ui, onExit = { leave(onExit) }, onNext = onNext?.let { next -> { leave(next) } })
         } else if (ui.outOfLives) {
-            OutOfLivesCard(onRestart = vm::restart, onExit = onExit)
+            OutOfLivesCard(
+                watching = watching,
+                onWatchAd = { watchAd(vm::restoreLife) },
+                onRestart = vm::restart,
+                onExit = onExit,
+            )
         }
     }
 }
@@ -131,11 +178,37 @@ private fun Lives(mistakes: Int) {
 
 /** Fixed height for hints and feedback, so the pad never jumps. */
 @Composable
-private fun StatusLine(ui: GameUi, vm: GameViewModel) {
+private fun StatusLine(
+    ui: GameUi,
+    vm: GameViewModel,
+    watching: Boolean,
+    onWatchAd: () -> Unit,
+    onBuyHints: (() -> Unit)?,
+    hintPackPrice: String?,
+) {
     val colors = LocalBoardColors.current
     Box(Modifier.fillMaxWidth().heightIn(min = 76.dp).padding(top = 8.dp)) {
         val hint = ui.hint
         when {
+            ui.hintNeedsTopUp -> Panel(Modifier.fillMaxWidth(), tint = colors.info) {
+                Text("Out of hints for today", style = MaterialTheme.typography.titleSmall, color = colors.clueText)
+                Text(
+                    "Three free hints refill at midnight. Watch a short video for one now.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.textMuted,
+                )
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                    GhostButton("Not now", onClick = vm::cancelTopUp)
+                    if (onBuyHints != null) GhostButton(hintPackPrice?.let { "25 for $it" } ?: "25 hints", onClick = onBuyHints)
+                    GhostButton(
+                        if (watching) "Loading…" else "Watch",
+                        onClick = onWatchAd,
+                        enabled = !watching,
+                        glyph = Glyph.PLAY,
+                        tint = colors.info,
+                    )
+                }
+            }
             hint != null -> Panel(Modifier.fillMaxWidth(), tint = colors.info) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     GameIcon(Glyph.BULB, colors.info, size = 18.dp)
@@ -162,13 +235,13 @@ private fun StatusLine(ui: GameUi, vm: GameViewModel) {
 }
 
 @Composable
-private fun Tools(ui: GameUi, vm: GameViewModel, onToggleAutoNotes: () -> Unit) {
+private fun Tools(ui: GameUi, vm: GameViewModel, onToggleAutoNotes: () -> Unit, hintsRemaining: Int) {
     Row(Modifier.fillMaxWidth().widthIn(max = 560.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Tool(Glyph.UNDO, "Undo", Modifier.weight(1f), enabled = ui.canUndo, onClick = vm::undo)
         Tool(Glyph.ERASER, "Erase", Modifier.weight(1f), onClick = vm::erase)
         Tool(Glyph.PENCIL, "Notes", Modifier.weight(1f), active = ui.pencil && !ui.autoNotes, enabled = !ui.autoNotes, onClick = vm::togglePencil)
         Tool(Glyph.WAND, "Auto", Modifier.weight(1f), active = ui.autoNotes, onClick = onToggleAutoNotes)
-        Tool(Glyph.BULB, "Hint", Modifier.weight(1f), onClick = vm::requestHint)
+        Tool(Glyph.BULB, "Hint", Modifier.weight(1f), badge = hintsRemaining.takeIf { it > 0 }?.toString(), onClick = vm::requestHint)
     }
 }
 
@@ -180,24 +253,42 @@ private fun Tool(
     modifier: Modifier,
     active: Boolean = false,
     enabled: Boolean = true,
+    badge: String? = null,
     onClick: () -> Unit,
 ) {
     val colors = LocalBoardColors.current
     val shape = RoundedCornerShape(16.dp)
     val tint = if (active) colors.onAccentFill else colors.clueText
-    Column(
-        modifier
-            .clip(shape)
-            .background(if (active) colors.accentFill else colors.surface)
-            .border(1.dp, if (active) colors.accentDeep else colors.stroke, shape)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .alpha(if (enabled) 1f else DISABLED_ALPHA)
-            .padding(vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        GameIcon(glyph, tint, size = 20.dp)
-        Text(label, style = MaterialTheme.typography.labelMedium, color = tint, maxLines = 1)
+    Box(modifier) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .background(if (active) colors.accentFill else colors.surface)
+                .border(1.dp, if (active) colors.accentDeep else colors.stroke, shape)
+                .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+                .alpha(if (enabled) 1f else DISABLED_ALPHA)
+                .padding(vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            GameIcon(glyph, tint, size = 20.dp)
+            Text(label, style = MaterialTheme.typography.labelMedium, color = tint, maxLines = 1)
+        }
+        // Hints in hand, so running out is never a surprise.
+        if (badge != null) {
+            Text(
+                badge,
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp)
+                    .clip(CircleShape)
+                    .background(colors.info)
+                    .padding(horizontal = 6.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.onAccent,
+            )
+        }
     }
 }
 
@@ -268,7 +359,7 @@ private fun ResultsCard(ui: GameUi, onExit: () -> Unit, onNext: (() -> Unit)?) {
 }
 
 @Composable
-private fun OutOfLivesCard(onRestart: () -> Unit, onExit: () -> Unit) {
+private fun OutOfLivesCard(watching: Boolean, onWatchAd: () -> Unit, onRestart: () -> Unit, onExit: () -> Unit) {
     val colors = LocalBoardColors.current
     Scrim {
         Panel(Modifier.fillMaxWidth()) {
@@ -284,9 +375,20 @@ private fun OutOfLivesCard(onRestart: () -> Unit, onExit: () -> Unit) {
                 color = colors.textMuted,
             )
             Spacer(Modifier.height(16.dp))
-            PrimaryButton("Try again", onClick = onRestart, modifier = Modifier.fillMaxWidth(), glyph = Glyph.UNDO)
+            // Keep going with this board: one life back for a short video. No fill still
+            // grants it - a button that sometimes does nothing is worse than a lost impression.
+            PrimaryButton(
+                if (watching) "Loading…" else "Watch a video, keep going",
+                onClick = onWatchAd,
+                enabled = !watching,
+                modifier = Modifier.fillMaxWidth(),
+                glyph = Glyph.HEART_SOLID,
+            )
             Spacer(Modifier.height(8.dp))
-            GhostButton("Back", onClick = onExit, modifier = Modifier.fillMaxWidth())
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                GhostButton("Start over", onClick = onRestart, modifier = Modifier.weight(1f), glyph = Glyph.UNDO)
+                GhostButton("Back", onClick = onExit, modifier = Modifier.weight(1f))
+            }
         }
     }
 }

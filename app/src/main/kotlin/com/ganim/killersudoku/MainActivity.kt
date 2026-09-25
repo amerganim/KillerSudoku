@@ -6,12 +6,19 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.ganim.killersudoku.ui.KillerApp
 
-/** The single activity: the Compose entry point, nothing else. */
+/** The single activity: the Compose entry point, and the foreground hook for billing. */
 class MainActivity : ComponentActivity() {
+    private val container get() = (application as KillerApplication).container
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val container = (application as KillerApplication).container
         setContent { KillerApp(container) }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Query and restore purchases on every launch and return to the app.
+        container.onAppForegrounded()
     }
 }

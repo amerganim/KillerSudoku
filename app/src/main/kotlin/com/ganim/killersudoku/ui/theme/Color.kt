@@ -255,6 +255,8 @@ internal fun contrastPairs(colors: BoardColors): List<ContrastPair> {
         ContrastPair("success on page", colors.success, colors.boardBackground, 4.5),
         ContrastPair("success on surface", colors.success, colors.surface, 4.5),
         ContrastPair("text on success", colors.onAccent, colors.success, 4.5),
+        // The hint-count badge on the Hint key.
+        ContrastPair("text on info", colors.onAccent, colors.info, 4.5),
         ContrastPair("info on page", colors.info, colors.boardBackground, 4.5),
         ContrastPair("info on surface", colors.info, colors.surface, 4.5),
         ContrastPair("major grid line on cell", colors.gridLineMajor, colors.cell, 3.0),
