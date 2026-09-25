@@ -2,7 +2,9 @@ package com.ganim.killersudoku.game
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -38,25 +40,29 @@ fun BoardCanvas(ui: GameUi, onSelect: (Int) -> Unit, modifier: Modifier = Modifi
     val colors = LocalBoardColors.current
     val measurer = rememberTextMeasurer()
     val outlines = remember(ui.puzzle) { CageOutlines(ui.puzzle) }
-    Canvas(
-        modifier
-            .aspectRatio(1f)
-            .pointerInput(Unit) {
-                detectTapGestures { p ->
-                    val cell = size.width / 9f
-                    val r = (p.y / cell).toInt().coerceIn(0, 8)
-                    val c = (p.x / cell).toInt().coerceIn(0, 8)
-                    onSelect(Geometry.cell(r, c))
-                }
-            },
-    ) {
-        val s = size.width / 9f
-        drawRect(colors.cell)
-        drawHighlights(ui, s, colors)
-        drawGrid(s, colors)
-        drawCages(ui, outlines, s, colors, measurer)
-        drawSelection(ui.selected, s, colors)
-        drawDigits(ui, s, colors, measurer)
+    Box(modifier.aspectRatio(1f)) {
+        Canvas(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTapGestures { p ->
+                        val cell = size.width / 9f
+                        val r = (p.y / cell).toInt().coerceIn(0, 8)
+                        val c = (p.x / cell).toInt().coerceIn(0, 8)
+                        onSelect(Geometry.cell(r, c))
+                    }
+                },
+        ) {
+            val s = size.width / 9f
+            drawRect(colors.cell)
+            drawHighlights(ui, s, colors)
+            drawGrid(s, colors)
+            drawCages(ui, outlines, s, colors, measurer)
+            drawSelection(ui.selected, s, colors)
+            drawDigits(ui, s, colors, measurer)
+        }
+        // Composes nothing unless a screen reader is exploring by touch.
+        BoardAccessibilityOverlay(ui, onSelect, Modifier.matchParentSize())
     }
 }
 
@@ -121,55 +127,13 @@ private fun DrawScope.drawGrid(s: Float, colors: BoardColors) {
     }
 }
 
-/**
- * Inset dashed outlines. Each border segment runs between inset corners; where the cage
- * continues around a corner the segment is extended so neighbouring segments meet - to the
- * cell edge at a straight join, and past it by the inset at a concave corner.
- */
-private class CageOutlines(puzzle: KillerPuzzle) {
-    /** Each segment as fractions of a cell: x1, y1, x2, y2 in cell units, inset applied at draw time. */
-    val segments: List<FloatArray>
-
-    init {
-        val k = puzzle.cageOf
-        fun same(cell: Int, dr: Int, dc: Int): Boolean {
-            val r = Geometry.row(cell) + dr
-            val c = Geometry.col(cell) + dc
-            return r in 0..8 && c in 0..8 && k[Geometry.cell(r, c)] == k[cell]
-        }
-        // Each entry: (x1, y1, x2, y2, ex1, ey1, ex2, ey2): base endpoints in inset units.
-        val out = ArrayList<FloatArray>()
-        for (cell in 0 until Geometry.CELLS) {
-            val r = Geometry.row(cell).toFloat()
-            val c = Geometry.col(cell).toFloat()
-            // For each side: direction to neighbour (dr, dc) and the two perpendicular directions.
-            // Represented with endpoint offsets in "inset" units: -1 means extend past edge, 0 edge, 1 inset.
-            fun end(perpDr: Int, perpDc: Int, sideDr: Int, sideDc: Int): Int = when {
-                !same(cell, perpDr, perpDc) -> 1
-                same(cell, perpDr + sideDr, perpDc + sideDc) -> -1
-                else -> 0
-            }
-            if (!same(cell, -1, 0)) out.add(floatArrayOf(c, r, c + 1, r, end(0, -1, -1, 0).toFloat(), 1f, -end(0, 1, -1, 0).toFloat(), 1f))
-            if (!same(cell, 1, 0)) out.add(floatArrayOf(c, r + 1, c + 1, r + 1, end(0, -1, 1, 0).toFloat(), -1f, -end(0, 1, 1, 0).toFloat(), -1f))
-            if (!same(cell, 0, -1)) out.add(floatArrayOf(c, r, c, r + 1, 1f, end(-1, 0, 0, -1).toFloat(), 1f, -end(1, 0, 0, -1).toFloat()))
-            if (!same(cell, 0, 1)) out.add(floatArrayOf(c + 1, r, c + 1, r + 1, -1f, end(-1, 0, 0, 1).toFloat(), -1f, -end(1, 0, 0, 1).toFloat()))
-        }
-        segments = out
-    }
-}
-
 private fun DrawScope.drawCages(ui: GameUi, outlines: CageOutlines, s: Float, colors: BoardColors, measurer: TextMeasurer) {
     val inset = s * 0.09f
     val dash = PathEffect.dashPathEffect(floatArrayOf(s * 0.07f, s * 0.05f))
     val stroke = 1.2f * density
     for (seg in outlines.segments) {
-        drawLine(
-            colors.cage,
-            Offset(seg[0] * s + seg[4] * inset, seg[1] * s + seg[5] * inset),
-            Offset(seg[2] * s + seg[6] * inset, seg[3] * s + seg[7] * inset),
-            stroke,
-            pathEffect = dash,
-        )
+        val p = outlines.points(seg, s, inset)
+        drawLine(colors.cage, Offset(p[0], p[1]), Offset(p[2], p[3]), stroke, pathEffect = dash)
     }
     val style = TextStyle(fontSize = (s * 0.21f / density / fontScale).sp, fontWeight = FontWeight.SemiBold, color = colors.clueText, fontFamily = DisplayFamily)
     for (cage in ui.puzzle.cages) {

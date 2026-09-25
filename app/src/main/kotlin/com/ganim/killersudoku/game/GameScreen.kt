@@ -34,6 +34,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.ganim.killersudoku.engine.model.Difficulty
@@ -311,6 +315,16 @@ private fun NumberPad(ui: GameUi, onDigit: (Int) -> Unit) {
                     .background(colors.surface)
                     .border(1.dp, colors.stroke, shape)
                     .clickable(enabled = !done, role = Role.Button) { onDigit(d) }
+                    // Read as an action, not as "7, 3": the count means nothing spoken bare.
+                    .clearAndSetSemantics {
+                        contentDescription = when {
+                            done -> "$d, all placed"
+                            ui.pencil && !ui.autoNotes -> "Note $d"
+                            else -> "Place $d, ${ui.remaining[d]} left"
+                        }
+                        role = Role.Button
+                        if (!done) onClick { onDigit(d); true }
+                    }
                     .alpha(if (done) DONE_ALPHA else 1f)
                     .padding(vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,

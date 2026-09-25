@@ -1,4 +1,4 @@
-﻿package com.ganim.killersudoku.engine.solver
+package com.ganim.killersudoku.engine.solver
 
 import com.ganim.killersudoku.engine.model.Digits
 import com.ganim.killersudoku.engine.model.Geometry
@@ -89,8 +89,14 @@ object CageCombination : Technique {
             val changed = cage.cells.filterIndexed { i, c -> grid.restrict(c, analysis.possible[i]) }
             if (changed.isNotEmpty()) {
                 val digits = analysis.possible.fold(0) { a, m -> a or m }
-                return Step(this, "The ${cage.size}-cell cage of ${cage.sum} can only use ${Digits.format(digits)}",
-                    changed.toIntArray())
+                val text = when {
+                    cage.size == 1 -> "${Geometry.cellName(cage.cells[0])} is a cage of ${cage.sum} on its own, so it is ${cage.sum}"
+                    // Exactly as many digits as cells: the combination itself is known.
+                    Digits.count(digits) == cage.size ->
+                        "The ${cage.size}-cell cage of ${cage.sum} can only be ${Digits.spoken(digits, "and")} here"
+                    else -> "The ${cage.size}-cell cage of ${cage.sum} only has room for ${Digits.spoken(digits, "or")} here"
+                }
+                return Step(this, text, changed.toIntArray())
             }
         }
         return null
@@ -109,7 +115,12 @@ class RuleOf45(override val tier: Int) : Technique {
             val analysis = SumAnalyzer.analyze(sc.cells, sc.sum, grid, index.mustDiffer)
             val changed = sc.cells.filterIndexed { i, c -> grid.restrict(c, analysis.possible[i]) }
             if (changed.isNotEmpty()) {
-                return Step(this, "${sc.label}: ${cellList(sc.cells)} must add up to ${sc.sum}", changed.toIntArray())
+                val text = if (sc.cells.size == 1) {
+                    "${sc.label}: ${Geometry.cellName(sc.cells[0])} is the only cell left over, so it must be ${sc.sum}"
+                } else {
+                    "${sc.label}: ${cellList(sc.cells)} must add up to ${sc.sum}"
+                }
+                return Step(this, text, changed.toIntArray())
             }
         }
         return null
@@ -165,7 +176,7 @@ object NakedSubset : Technique {
                 if (Digits.count(union) == size) {
                     val changed = house.filter { it !in cells && grid.eliminate(it, union) }
                     if (changed.isNotEmpty()) {
-                        return Step(this, "${cellList(cells.toIntArray())} hold only ${Digits.format(union)} in " +
+                        return Step(this, "${cellList(cells.toIntArray())} hold only ${Digits.spoken(union, "and")} between them in " +
                             "${Geometry.houseName(h)}", changed.toIntArray())
                     }
                 }
@@ -191,7 +202,7 @@ object HiddenSubset : Technique {
                 if (cells.size == size) {
                     val changed = cells.filter { grid.restrict(it, set) }
                     if (changed.isNotEmpty()) {
-                        return Step(this, "${Digits.format(set)} can only go in ${cellList(cells.toIntArray())} " +
+                        return Step(this, "${Digits.spoken(set, "and")} can only go in ${cellList(cells.toIntArray())} " +
                             "within ${Geometry.houseName(h)}", changed.toIntArray())
                     }
                 }

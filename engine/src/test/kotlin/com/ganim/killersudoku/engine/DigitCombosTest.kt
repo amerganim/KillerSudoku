@@ -36,4 +36,10 @@ class DigitCombosTest {
         DigitCombos.possibleDigits(3, 99) shouldBe 0
         DigitCombos.requiredDigits(3, 5) shouldBe 0
     }
+
+    @Test fun `digits are spoken as a player would say them`() {
+        Digits.spoken(digits("7"), "and") shouldBe "7"
+        Digits.spoken(digits("39"), "and") shouldBe "3 and 9"
+        Digits.spoken(digits("13456"), "or") shouldBe "1, 3, 4, 5 or 6"
+    }
 }

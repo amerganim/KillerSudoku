@@ -37,4 +37,17 @@ object Digits {
     fun toList(mask: Int): List<Int> = (1..9).filter { contains(mask, it) }
 
     fun format(mask: Int): String = toList(mask).joinToString("")
+
+    /**
+     * Digits as a player would say them: "7", "3 and 9", "1, 4 or 6". [last] is the word
+     * before the final digit - "and" when all of them are used, "or" for alternatives.
+     */
+    fun spoken(mask: Int, last: String): String {
+        val list = toList(mask)
+        return when (list.size) {
+            0 -> "nothing"
+            1 -> "${list[0]}"
+            else -> list.dropLast(1).joinToString(", ") + " $last ${list.last()}"
+        }
+    }
 }

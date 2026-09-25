@@ -59,13 +59,30 @@ Pointing pairs moved from tier 4 to tier 3.
 - [x] Phase 1 engine: techniques, solver, generator with repair, pack codec, pack tool, tests
 - [x] Phase 2 first pass: board with dashed inset cages, persistent number pad, notes, auto-notes, highlighting,
       conflicts, 3 lives, 200-step undo, technique-naming hints, saved game
-- [ ] Phase 2 remaining: render check against every cage shape in the pack, 60 fps on a low-end device, device testing
+- [x] Phase 2 rendering: cage outlines proven closed for every cage in all 5,000 puzzles (`CageOutlinesTest`)
+- [ ] Phase 2 remaining: 60 fps on a low-end device, device testing
 - [x] Phase 3 shell and theming. Built and unit-tested. **Not yet checked on a device.**
 - [x] Phase 4 ads, billing, hardening. Built, policy-tested, and the minified release builds. **SDK paths need a
       device and Play test tracks.**
-- [ ] Phase 5 store + closed testing (needs its own 12 testers × 14 days — start recruiting now)
+- [~] Phase 5 store assets: icon, feature graphic, listing copy, privacy policy done (`store/`).
+      **Screenshots need the device**; closed testing needs its own 12 testers × 14 days — start recruiting now
 
-**227 tests, 0 failures** (engine 20, app 207).
+**236 tests, 0 failures** (engine 21, app 215).
+
+## Since Phase 4
+
+- **Cage outlines proven for the whole pack.** The outline geometry now lives in `game/CageOutlines.kt`, outside
+  Compose, and `CageOutlinesTest` checks all 5,000 puzzles: each side between two cages gets exactly one segment,
+  and every cage outline closes, with each segment end meeting exactly one other. I broke the concave-corner rule
+  on purpose to confirm the test catches it (28 loose ends in the first puzzle), then restored it.
+- **Screen reader.** With TalkBack on, each cell announces its position, its cage ("cage of 17, 2 cells") and what
+  it holds ("7, wrong", "empty, notes 1 4 9"). Activating a cell selects it, and the number pad keys say "Place 7,
+  3 left". Built only while touch exploration is on, so it costs nothing otherwise. Not yet heard on a device.
+- **Hint wording.** Real hints read "can only use 39" and "can only use 3456789". Digits are now spoken ("3 and 9",
+  "1, 4 or 6"), an exact combination is said as one ("can only be 1 and 2 here"), and a lone remainder says what it
+  is. `HintTextTest` checks over 1,000 hints from real ladder puzzles: each names its cell, states its digit, never
+  runs digits together, and reads as a sentence. It caught two more on its first run.
+- **Store material** in `store/`: see `store/README.md`.
 
 ## Phase 4: monetization and hardening
 
