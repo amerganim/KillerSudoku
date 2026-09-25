@@ -60,14 +60,48 @@ Pointing pairs moved from tier 4 to tier 3.
 - [x] Phase 2 first pass: board with dashed inset cages, persistent number pad, notes, auto-notes, highlighting,
       conflicts, 3 lives, 200-step undo, technique-naming hints, saved game
 - [x] Phase 2 rendering: cage outlines proven closed for every cage in all 5,000 puzzles (`CageOutlinesTest`)
-- [ ] Phase 2 remaining: 60 fps on a low-end device, device testing
+- [x] Phase 2 on device: 60 fps met (p95 15 ms), state survives process death (see below)
 - [x] Phase 3 shell and theming. Built and unit-tested. **Not yet checked on a device.**
 - [x] Phase 4 ads, billing, hardening. Built, policy-tested, and the minified release builds. **SDK paths need a
       device and Play test tracks.**
 - [~] Phase 5 store assets: icon, feature graphic, listing copy, privacy policy done (`store/`).
       **Screenshots need the device**; closed testing needs its own 12 testers × 14 days — start recruiting now
 
-**236 tests, 0 failures** (engine 21, app 215).
+**240 tests, 0 failures** (engine 21, app 219).
+
+## Verified on the Galaxy A15 (2026-09-25)
+
+Samsung SM-A155M, Android 16, 1080×2340, 90 Hz.
+
+| Check | Result |
+|---|---|
+| Cold start, minified release | **345–498 ms** (budget: 2 s) |
+| Release APK | 4.56 MB |
+| R8 | No missing classes; release read the debug build's database, pack and settings |
+| Force-stop mid-puzzle | Board, pencil marks, lives, clock and undo all restored; Play offered "Resume" |
+| Monkey soak, release | 4,000 events: no crash, no ANR, process alive |
+| Frame times in play | 5,042 frames, **0.04% janky, p50 11 ms, p90 13 ms, p95 15 ms**, no missed vsync |
+| Interstitial | None after solves 1 and 2, one test ad on dismissing the 3rd |
+| Rewarded hint / life | Top-up offer, video, hint shown; life restored after a video |
+| Daily | Friday = hard; solving it set streak 1 and marked the calendar |
+
+### Bugs only the device showed, all fixed
+
+- **The board shrank whenever a hint appeared**, because the hint panel took height from the board's column.
+  Now the hint panel sits over the tool row and short messages float just above it, so the board never
+  changes size.
+- **Pencil mark 1 was hidden under cage sums.** In a cell carrying its cage's sum, the note grid now starts
+  below the label.
+- **Undo lost its surface and border** when it switched from disabled to enabled, because it was dimmed with
+  `Modifier.alpha` switching value on a clipped, bordered node. Undo and the number pad now dim through colour.
+- **One rewarded video counted as two hints**: the grant and the screen's retry both paid for the waiting
+  hint. The hint is now claimed before the grant; `GameViewModelTest` pins it.
+- **The results card showed 0 hints after a restart.** The count is now saved (saved-board format v2, which
+  still reads v1).
+- **The tabs had a doubled status-bar gap** (the Scaffold inset plus `statusBarsPadding`).
+
+Still needs you, because it means changing phone settings: **TalkBack** on the board, and **200% font
+size**.
 
 ## Since Phase 4
 

@@ -157,11 +157,18 @@ private fun DrawScope.drawDigits(ui: GameUi, s: Float, colors: BoardColors, meas
             val layout = measurer.measure(v.toString(), big.copy(color = if (wrong || ui.conflicts[c]) colors.cellMistake else colors.clueText))
             drawText(layout, topLeft = Offset(o.x + (s - layout.size.width) / 2, o.y + (s - layout.size.height) / 2 + s * 0.04f))
         } else if (ui.notes[c] != 0) {
-            val sub = s * 0.8f / 3
+            // In a cell that carries its cage's sum, the label sits where the top-left mark
+            // would go - on the A15 a pencilled 1 simply vanished under an "11". So there the
+            // grid starts below the label and its rows pack a little tighter.
+            val labelled = ui.puzzle.cages[ui.puzzle.cageOf[c]].anchor == c
+            val colW = s * 0.8f / 3
+            val top = if (labelled) s * 0.30f else s * 0.14f
+            val rowH = if (labelled) s * 0.21f else colW * 0.95f
+            val style = if (labelled) small.copy(fontSize = small.fontSize * 0.9f) else small
             for (d in Digits.toList(ui.notes[c])) {
-                val layout = measurer.measure(d.toString(), small)
-                val cx = o.x + s * 0.1f + ((d - 1) % 3) * sub + sub / 2
-                val cy = o.y + s * 0.14f + ((d - 1) / 3) * sub * 0.95f + sub / 2
+                val layout = measurer.measure(d.toString(), style)
+                val cx = o.x + s * 0.1f + ((d - 1) % 3) * colW + colW / 2
+                val cy = o.y + top + ((d - 1) / 3) * rowH + rowH / 2
                 drawText(layout, topLeft = Offset(cx - layout.size.width / 2, cy - layout.size.height / 2))
             }
         }

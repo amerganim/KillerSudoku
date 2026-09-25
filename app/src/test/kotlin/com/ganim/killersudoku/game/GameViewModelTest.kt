@@ -90,6 +90,23 @@ class GameViewModelTest {
     }
 
     @Test
+    @DisplayName("one rewarded video is one hint, even when the wallet refresh triggers a retry")
+    fun `reward and retry do not double count`() = runTest(dispatcher) {
+        // On the A15 the grant bumped the wallet, the screen's retry saw a waiting hint and
+        // paid for it as well, and the results card counted two hints for one video.
+        val bank = FakeBank(0)
+        val vm = model(bank)
+        vm.requestHint(); advanceUntilIdle()
+        vm.grantRewardedHint()
+        vm.retryPendingHint() // what the screen does when the wallet count goes up
+        advanceUntilIdle()
+        vm.ui.hint.shouldNotBeNull()
+        vm.ui.hintsUsed shouldBe 1
+        bank.granted shouldBe 1
+        bank.spent shouldBe 1
+    }
+
+    @Test
     fun `declining the top-up leaves the wallet untouched`() = runTest(dispatcher) {
         val bank = FakeBank(0)
         val vm = model(bank)

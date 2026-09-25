@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -29,8 +30,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
@@ -107,19 +109,47 @@ fun GameScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             TopBar(ui, onExit)
-            // The board takes the largest square that fits what is left once the hint
-            // line, tools and pad have their room. Sizing it from the width alone
-            // overflowed in landscape and split screen, which targetSdk 36 makes
-            // unavoidable on large screens.
-            Column(Modifier.weight(1f).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                BoardCanvas(
-                    ui,
-                    onSelect = { tick(); vm.select(it) },
-                    modifier = Modifier.weight(1f, fill = false).widthIn(max = 560.dp),
-                )
-                StatusLine(ui, vm, watching, onWatchAd = { watchAd(vm::grantRewardedHint) }, onBuyHints, hintPackPrice)
+            // The board takes the largest square that fits between the top bar and the
+            // tools. Sizing it from the width alone overflowed in landscape and split
+            // screen, which targetSdk 36 makes unavoidable on large screens.
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                BoardCanvas(ui, onSelect = { tick(); vm.select(it) }, modifier = Modifier.widthIn(max = 560.dp))
             }
-            Tools(ui, vm, onToggleAutoNotes, hintsRemaining)
+            // Hints and feedback float over the space above the tools rather than taking
+            // room in the column. On the A15 the first version shrank the whole board
+            // every time a hint appeared, which is disorienting mid-thought.
+            // A one-line message ("7 doesn't go there") grows upward from a zero-height
+            // anchor, so it sits just above the tools and never covers Undo right after a
+            // mistake.
+            if (ui.message != null && ui.hint == null && !ui.hintNeedsTopUp) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 560.dp)
+                        .height(0.dp)
+                        .wrapContentHeight(Alignment.Bottom, unbounded = true)
+                        .zIndex(1f),
+                ) {
+                    Box(Modifier.padding(bottom = 8.dp)) { StatusLine(ui, vm, watching, {}, null, null) }
+                }
+            }
+            // A hint (or the top-up offer) is taller, and takes over the tool row while it
+            // is open: nothing there is needed while reading it, and its own buttons close
+            // it. Anchored to the tools' bottom edge so it reaches up no further than it
+            // must - on the A15 it then clears the board's last row.
+            Box(Modifier.fillMaxWidth().widthIn(max = 560.dp)) {
+                Tools(ui, vm, onToggleAutoNotes, hintsRemaining)
+                if (ui.hint != null || ui.hintNeedsTopUp) {
+                    Box(
+                        Modifier
+                            .matchParentSize()
+                            .wrapContentHeight(Alignment.Bottom, unbounded = true)
+                            .zIndex(1f),
+                    ) {
+                        StatusLine(ui, vm, watching, onWatchAd = { watchAd(vm::grantRewardedHint) }, onBuyHints, hintPackPrice)
+                    }
+                }
+            }
             Spacer(Modifier.height(10.dp))
             NumberPad(ui) { tick(); vm.digit(it) }
             Spacer(Modifier.height(10.dp))
@@ -180,7 +210,7 @@ private fun Lives(mistakes: Int) {
     }
 }
 
-/** Fixed height for hints and feedback, so the pad never jumps. */
+/** Hints and feedback. Floats above the tools; takes no room from the board. */
 @Composable
 private fun StatusLine(
     ui: GameUi,
@@ -191,8 +221,10 @@ private fun StatusLine(
     hintPackPrice: String?,
 ) {
     val colors = LocalBoardColors.current
-    Box(Modifier.fillMaxWidth().heightIn(min = 76.dp).padding(top = 8.dp)) {
-        val hint = ui.hint
+    val hint = ui.hint
+    if (hint == null && !ui.hintNeedsTopUp && ui.message == null) return
+    // Opaque, because it sits on top of the tool row; the panels themselves are washes.
+    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(colors.boardBackground)) {
         when {
             ui.hintNeedsTopUp -> Panel(Modifier.fillMaxWidth(), tint = colors.info) {
                 Text("Out of hints for today", style = MaterialTheme.typography.titleSmall, color = colors.clueText)
@@ -228,12 +260,9 @@ private fun StatusLine(
                     GhostButton("Fill in ${hint.digit}", onClick = vm::applyHint, glyph = Glyph.CHECK, tint = colors.info)
                 }
             }
-            ui.message != null -> Text(
-                ui.message,
-                Modifier.align(Alignment.Center),
-                style = MaterialTheme.typography.labelLarge,
-                color = colors.cellMistake,
-            )
+            ui.message != null -> Panel(Modifier.fillMaxWidth(), tint = colors.cellMistake) {
+                Text(ui.message, style = MaterialTheme.typography.labelLarge, color = colors.cellMistake)
+            }
         }
     }
 }
@@ -262,7 +291,11 @@ private fun Tool(
 ) {
     val colors = LocalBoardColors.current
     val shape = RoundedCornerShape(16.dp)
-    val tint = if (active) colors.onAccentFill else colors.clueText
+    // Dimmed through the colours, not Modifier.alpha: on the A15 a key whose alpha layer
+    // switched from 0.4 to 1 (Undo becoming available) lost its surface and border until
+    // the next full redraw.
+    val base = if (active) colors.onAccentFill else colors.clueText
+    val tint = if (enabled) base else base.copy(alpha = DISABLED_ALPHA)
     Box(modifier) {
         Column(
             Modifier
@@ -271,7 +304,6 @@ private fun Tool(
                 .background(if (active) colors.accentFill else colors.surface)
                 .border(1.dp, if (active) colors.accentDeep else colors.stroke, shape)
                 .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-                .alpha(if (enabled) 1f else DISABLED_ALPHA)
                 .padding(vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -325,17 +357,18 @@ private fun NumberPad(ui: GameUi, onDigit: (Int) -> Unit) {
                         role = Role.Button
                         if (!done) onClick { onDigit(d); true }
                     }
-                    .alpha(if (done) DONE_ALPHA else 1f)
                     .padding(vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                // A finished digit fades through its colours (see Tool for why not alpha).
+                fun Color.done() = if (done) copy(alpha = DONE_ALPHA) else this
                 Text(
                     d.toString(),
                     style = if (ui.pencil && !ui.autoNotes) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineSmall,
-                    color = if (ui.pencil && !ui.autoNotes) colors.textMuted else colors.clueText,
+                    color = (if (ui.pencil && !ui.autoNotes) colors.textMuted else colors.clueText).done(),
                     textAlign = TextAlign.Center,
                 )
-                Text(ui.remaining[d].toString(), style = MaterialTheme.typography.labelMedium, color = colors.textMuted)
+                Text(ui.remaining[d].toString(), style = MaterialTheme.typography.labelMedium, color = colors.textMuted.done())
             }
         }
     }

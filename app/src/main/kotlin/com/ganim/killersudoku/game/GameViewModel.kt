@@ -78,7 +78,7 @@ class GameViewModel(
     private var pencil = false
     private var autoNotes = false
     private var hint: Hint? = null
-    private var hintsUsed = 0
+    private var hintsUsed = restored?.hintsUsed ?: 0
     /** A hint already found but not yet paid for. */
     private var pendingHint: Hint? = null
     private var message: String? = null
@@ -181,6 +181,10 @@ class GameViewModel(
     /** A rewarded ad was watched (or had no fill, which grants anyway): earn one, spend it. */
     fun grantRewardedHint() {
         val found = pendingHint ?: return
+        // Claimed before the grant lands. Otherwise the grant bumps the wallet, the
+        // screen's retry sees a waiting hint and pays for it too, and one video counts as
+        // two hints in the results (seen on the A15).
+        pendingHint = null
         viewModelScope.launch {
             monetization?.grantHintFromAd()
             monetization?.spendHint()
@@ -207,6 +211,7 @@ class GameViewModel(
         selected = found.cell
         hintsUsed++
         publish()
+        save()
     }
 
     /** Watching an ad restores one life, so an out-of-lives player can carry on. */
@@ -260,6 +265,7 @@ class GameViewModel(
             mistakes = session.mistakes,
             elapsedMs = elapsedMs,
             undo = session.undoHistory,
+            hintsUsed = hintsUsed,
         )
         val completed = session.isSolved
         // NonCancellable: the save issued from onPause must land even as the screen
